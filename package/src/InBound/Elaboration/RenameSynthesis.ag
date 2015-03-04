@@ -1,0 +1,101 @@
+module {InBound.Elaboration.RenameSynthesis} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+renameAN :: AttrName
+renameAN = AN "rename"
+
+renameRef :: Ag.AttrRef
+renameRef = Ag.AttrRef Ag.Loc renameAN
+}
+
+sem SortDecl
+  | SortDecl
+      loc.renameAttrDecl =
+        [ Ag.SynDecl
+            renameAN
+            (Ag.TSort @sortName)
+        ]
+
+sem CtorDecl
+  | CtorDecl
+      loc.renameAttrDef =
+        @ctorFields.renameAttrDef ++
+        [ Ag.AttrDef renameRef $
+            Ag.ExprCtor @ctorName
+              @ctorFields.renameAttrDefExpr
+        ]
+
+attr CtorFieldDecls
+  syn renameAttrDefExpr use {:} {[]} :: {Ag.Exprs}
+  syn renameAttrDef use {++} {[]} :: {Ag.AttrDefs}
+attr CtorFieldDecl
+  syn renameAttrDefExpr :: {Ag.Expr}
+  syn renameAttrDef use {++} {[]} :: {Ag.AttrDefs}
+
+sem CtorFieldDecl
+  | CFRef
+      lhs.renameAttrDefExpr =
+        Ag.ExprAttrRef (renamedFieldRef @ctorFieldName)
+      lhs.renameAttrDef =
+        [ Ag.AttrDef
+            (renamedFieldRef @ctorFieldName) $
+            Ag.ExprMapLookup
+              (Ag.ExprField @ctorFieldName)
+              (Ag.ExprField @ctorFieldName)
+              (Ag.ExprAttrRef
+                (attrRefToRenameMapRef
+                   (AttrRef Lhs @ctorFieldType)))
+        ]
+  | CFAtom
+      lhs.renameAttrDefExpr =
+        Ag.ExprAttrRef
+          (renamedFieldRef @ctorFieldName)
+  | CFSubtree
+      lhs.renameAttrDefExpr =
+        Ag.ExprAttrRef
+          (Ag.AttrRef (Ag.Sub @ctorFieldName) renameAN)
+  | CFTerminal
+      lhs.renameAttrDefExpr =
+        Ag.ExprField @ctorFieldName
+
+-- Collect attribute names for semantic funcions
+attr AttrDecls AttrDecl
+  syn renameFunInh use {++} {[]} :: {Ag.AttrNameTypes}
+  syn renameFunSyn use {++} {[]} :: {Ag.AttrNameTypes}
+
+sem AttrDecl
+  | SynDecl
+      loc.renameFun = [ (attrNameToRenameContextName @attrName,
+                         @loc.renameContextType)
+                      , (attrNameToRenameMapName @attrName,
+                         @loc.renameMapType)
+                      ]
+      +renameFunSyn = @loc.renameFun ++
+  | InhDecl
+      loc.renameFun = [ (attrNameToRenameContextName @attrName,
+                        @loc.renameContextType)
+                      , (attrNameToRenameMapName @attrName,
+                         @loc.renameMapType)
+                      ]
+      +renameFunInh = @loc.renameFun ++
+
+sem SortDecl
+  | SortDecl
+      loc.renameFun =
+        Ag.SemFun
+          ("rename_" ++ fromSN @sortName)
+          @sortAttributes.renameFunInh
+          ((renameAN, Ag.TSort @sortName):
+             @sortAttributes.renameFunSyn)

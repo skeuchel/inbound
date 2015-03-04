@@ -1,0 +1,12 @@
+module {InBound.AG} {} {import InBound.Syntax}
+
+include "src/InBound/Syntax.ag"
+include "src/InBound/Environment.ag"
+include "src/InBound/Elaboration/Term.ag"
+include "src/InBound/Elaboration/Context.ag"
+include "src/InBound/Elaboration/FreeVar.ag"
+include "src/InBound/Elaboration/RenameContext.ag"
+include "src/InBound/Elaboration/RenameMap.ag"
+include "src/InBound/Elaboration/RenameSynthesis.ag"
+include "src/InBound/Elaboration/SubstMap.ag"
+include "src/InBound/Elaboration/SubstSynthesis.ag"

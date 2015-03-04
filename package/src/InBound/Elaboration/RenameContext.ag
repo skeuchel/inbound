@@ -1,0 +1,80 @@
+module {InBound.Elaboration.RenameContext} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+attrNameToRenameContextName :: AttrName -> AttrName
+attrNameToRenameContextName (AN an) = AN $ an ++ "_rctx"
+
+attrRefToRenameContextRef :: AttrRef -> Ag.AttrRef
+attrRefToRenameContextRef (AttrRef nl an) =
+  Ag.AttrRef (elabNodeLabel nl) (attrNameToRenameContextName an)
+
+renamedFieldRef :: FieldName -> Ag.AttrRef
+renamedFieldRef (FN fn) =
+  Ag.AttrRef (elabNodeLabel Loc) (AN $ fn ++ "_ren")
+}
+
+-- Elaborate attribute declarations
+sem AttrDecl
+  | InhDecl SynDecl
+      loc.renameContextType =
+        case @attrType.self of
+          Context ns -> Ag.TSet (Ag.TTerminal (fromNN ns))
+  | SynDecl
+      +elaboration =
+        [ Ag.SynDecl
+            (attrNameToRenameContextName @attrName)
+            @loc.renameContextType
+        ] ++
+  | InhDecl
+      +elaboration =
+        [ Ag.InhDecl
+            (attrNameToRenameContextName @attrName)
+            @loc.renameContextType
+        ] ++
+
+-- Elaborate attribute definitions
+sem AttrDef
+  | AttrDef
+      +elaboration =
+        (Ag.AttrDef
+         (attrRefToRenameContextRef @attrDefRef.self)
+         (Ag.ExprAttrRef $
+            attrRefToRenameContextRef @attrDefExpr.attrName) :
+         @attrDefExpr.elabRenameContext) ++
+
+attr Expr
+  syn elabRenameContext use {++} {[]} :: {[Ag.AttrDef]}
+sem Expr
+  | ExprAttrRef
+      lhs.elabRenameContext = []
+  | ExprNil
+      lhs.elabRenameContext =
+        [ Ag.AttrDef
+            (attrRefToRenameContextRef @loc.attrName)
+            Ag.ExprSetEmpty
+        ]
+  | ExprCons
+      lhs.elabRenameContext =
+        [ Ag.AttrDef
+            (renamedFieldRef @head)
+            (Ag.ExprFresh . Ag.ExprAttrRef $
+               attrRefToRenameContextRef @tail.attrName)
+        , Ag.AttrDef
+            (attrRefToRenameContextRef @loc.attrName)
+            (Ag.ExprSetInsert
+               (Ag.ExprAttrRef $ renamedFieldRef @head)
+               (Ag.ExprAttrRef $
+                  attrRefToRenameContextRef @tail.attrName))
+        ] ++ @tail.elabRenameContext

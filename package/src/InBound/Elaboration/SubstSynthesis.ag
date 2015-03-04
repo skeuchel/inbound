@@ -1,0 +1,112 @@
+module {InBound.Elaboration.SubstSynthesis} {} {}
+
+imports
+{
+import Control.Monad
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+substAN :: AttrName
+substAN = AN "subst"
+
+substRef :: Ag.AttrRef
+substRef = Ag.AttrRef Ag.Lhs substAN
+}
+
+-- Figure out which constructors are substitutable
+attr CtorFieldDecl CtorFieldDecls
+  syn substitutable use {||} {False} :: Bool
+sem CtorFieldDecl
+  | CFRef
+      loc.substitutable = isJust @loc.mbsort
+sem CtorDecl
+  | CtorDecl
+      loc.substitutable = @ctorFields.substitutable
+
+sem SortDecl
+  | SortDecl
+      loc.substAttrDecl =
+        [ Ag.SynDecl
+            substAN
+            (Ag.TSort @sortName)
+        ]
+
+sem CtorDecl
+  | CtorDecl
+      loc.substVarFailAttrDefExpr =
+        Ag.ExprCtor @ctorName @ctorFields.substAttrDef
+      loc.substAttrDef =
+        case @ctorFields.substVarAttrDef of
+          Just e | @loc.substitutable -> [ Ag.AttrDef substRef e ]
+          _ -> [ Ag.AttrDef substRef @loc.substVarFailAttrDefExpr ]
+
+attr CtorFieldDecls
+  syn substAttrDef use {:} {[]} :: {Ag.Exprs}
+  inh substVarFailAttrDefExpr :: {Ag.Expr}
+attr CtorFieldDecl
+  syn substAttrDef :: {Ag.Expr}
+  inh substVarFailAttrDefExpr :: {Ag.Expr}
+attr CtorFieldDecls CtorFieldDecl
+  syn substVarAttrDef use {mplus} {mzero} :: {Maybe Ag.Expr}
+
+sem CtorFieldDecl
+  | CFRef
+      lhs.substAttrDef =
+        Ag.ExprAttrRef $ renamedFieldRef @ctorFieldName
+      lhs.substVarAttrDef =
+        if @loc.substitutable
+        then Just $
+               Ag.ExprMapLookup
+                 @lhs.substVarFailAttrDefExpr
+                 (Ag.ExprAttrRef $ renamedFieldRef @ctorFieldName)
+                 (Ag.ExprAttrRef
+                  (attrRefToSubstMapRef
+                   (AttrRef Lhs @ctorFieldType)))
+        else Nothing
+  | CFAtom
+      lhs.substAttrDef =
+        Ag.ExprAttrRef
+          (renamedFieldRef @ctorFieldName)
+  | CFSubtree
+      lhs.substAttrDef =
+        Ag.ExprAttrRef
+          (Ag.AttrRef (Ag.Sub @ctorFieldName) substAN)
+  | CFTerminal
+      lhs.substAttrDef =
+        Ag.ExprField @ctorFieldName
+
+-- Collect attribute names for semantic funcions
+attr AttrDecls AttrDecl
+  syn substFunInh use {++} {[]} :: {Ag.AttrNameTypes}
+  syn substFunSyn use {++} {[]} :: {Ag.AttrNameTypes}
+
+sem AttrDecl
+  | SynDecl
+      loc.substFun =
+        if @loc.substitutable
+        then [(attrNameToSubstMapName @attrName, @loc.substMapType)]
+        else []
+      +substFunSyn = (@loc.renameFun ++ @loc.substFun) ++
+  | InhDecl
+      loc.substFun =
+        if @loc.substitutable
+        then [(attrNameToSubstMapName @attrName, @loc.substMapType)]
+        else []
+      +substFunInh = (@loc.renameFun ++ @loc.substFun) ++
+
+sem SortDecl
+  | SortDecl
+      loc.substFun =
+        Ag.SemFun
+          ("subst_" ++ fromSN @sortName)
+          @sortAttributes.substFunInh
+          ((substAN, Ag.TSort @sortName):
+             @sortAttributes.substFunSyn)

@@ -1,0 +1,5 @@
+module {Ag.AG} {} {import Ag.Syntax}
+
+include "src/Ag/Syntax.ag"
+include "src/Ag/Environment.ag"
+include "src/Ag/Pretty.ag"

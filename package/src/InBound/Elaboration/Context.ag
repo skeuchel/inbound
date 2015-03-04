@@ -1,0 +1,68 @@
+module {InBound.Elaboration.Context} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+elabNodeLabel :: NodeLabel -> Ag.NodeLabel
+elabNodeLabel Lhs      = Ag.Lhs
+elabNodeLabel Loc      = Ag.Loc
+elabNodeLabel (Sub fn) = Ag.Sub fn
+
+attrRefToContextRef :: AttrRef -> Ag.AttrRef
+attrRefToContextRef (AttrRef nl an) =
+  Ag.AttrRef (elabNodeLabel nl) an
+}
+
+-- Elaborate attribute declarations
+sem AttrDecl
+  | SynDecl
+      loc.contextType =
+        case @attrType.self of
+          Context ns -> Ag.TSet (Ag.TTerminal (fromNN ns))
+      +elaboration = [Ag.SynDecl @attrName @loc.contextType] ++
+  | InhDecl
+      loc.contextType =
+        case @attrType.self of
+          Context ns -> Ag.TSet (Ag.TTerminal (fromNN ns))
+      +elaboration = [Ag.InhDecl @attrName @loc.contextType] ++
+
+-- Elaborate attribute definitions
+sem AttrDef
+  | AttrDef
+      +elaboration =
+        (Ag.AttrDef
+         (attrRefToContextRef @attrDefRef.self)
+         (Ag.ExprAttrRef $
+            attrRefToContextRef @attrDefExpr.attrName) :
+         @attrDefExpr.elabContext) ++
+
+attr Expr
+  syn elabContext use {++} {[]} :: {[Ag.AttrDef]}
+sem Expr
+  | ExprAttrRef
+      lhs.elabContext = []
+  | ExprNil
+      lhs.elabContext =
+        [ Ag.AttrDef
+          (attrRefToContextRef @loc.attrName)
+          Ag.ExprSetEmpty
+        ]
+  | ExprCons
+      lhs.elabContext =
+        [ Ag.AttrDef
+            (attrRefToContextRef @loc.attrName)
+            (Ag.ExprSetInsert
+               (Ag.ExprField @head)
+               (Ag.ExprAttrRef $
+                  attrRefToContextRef @tail.attrName))
+        ] ++ @tail.elabContext

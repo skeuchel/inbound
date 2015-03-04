@@ -1,0 +1,73 @@
+module {Ag.Environment} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import Ag.Syntax
+}
+
+-- Attribute environments
+attr AttrDecl AttrDecls
+  -- The attributes sAttrSyn resp. sAttrInh accumulate a mapping from
+  -- synthesized resp. inherited attribute names to the type of the
+  -- attribute. sAttrSyn and sAttrInh carry incomplete information.
+  syn sAttrSyn use {M.union} {M.empty} :: LocEnvAttrType
+  syn sAttrInh use {M.union} {M.empty} :: LocEnvAttrType
+
+attr Specification SortDecl SortDecls CtorDecl CtorDecls
+  -- At the level of sorts we add the sort name (fst) as a key next to the
+  -- attribute name (snd). sAttrSyn and sAttrInh are potentially incomplete.
+  syn sAttrSyn use {M.union} {M.empty} :: EnvAttrType
+  syn sAttrInh use {M.union} {M.empty} :: EnvAttrType
+
+-- Maps attribute names to types.
+attr CtorDecl CtorDecls CtorFieldDecl CtorFieldDecls
+  AttrDef AttrDefs SemFun SemFuns AttrNameType AttrNameTypes
+  -- Environments about the attributes specific to a single SortDecl.
+  inh locEnvAttrSyn :: LocEnvAttrType
+  inh locEnvAttrInh :: LocEnvAttrType
+
+attr SortDecl SortDecls CtorDecl CtorDecls
+  AttrDef AttrDefs Expr Exprs SemFun SemFuns
+  -- Environments about all attributes of all sorts.
+  inh envAttrSyn :: EnvAttrType
+  inh envAttrInh :: EnvAttrType
+
+sem AttrDecl
+  | SynDecl lhs.sAttrSyn = M.singleton @attrName @attrType.self
+  | InhDecl lhs.sAttrInh = M.singleton @attrName @attrType.self
+
+sem SortDecl
+  | SortDecl
+      lhs.sAttrSyn = M.mapKeysMonotonic
+                       (\an -> (@sortName,an))
+                       @sortAttributes.sAttrSyn
+      lhs.sAttrInh = M.mapKeysMonotonic
+                       (\an -> (@sortName,an))
+                       @sortAttributes.sAttrInh
+
+sem SortDecl
+  | SortDecl
+      loc.locEnvAttrSyn = @sortAttributes.sAttrSyn
+      loc.locEnvAttrInh = @sortAttributes.sAttrInh
+
+sem Specification
+  | Specification
+      loc.envAttrSyn = @specSortDecls.sAttrSyn
+      loc.envAttrInh = @specSortDecls.sAttrInh
+
+-- Sort information
+attr AttrDecl AttrDecls CtorDecls CtorDecl CtorFieldDecls CtorFieldDecl
+  AttrDef AttrDefs Expr Exprs SemFun SemFuns AttrNameType AttrNameTypes
+  -- This inherited attribute passes down the name of the sort for the
+  -- constructors and attribute declarations / definitions.
+  inh envSort  :: SortName
+
+sem SortDecl
+  | SortDecl
+      loc.envSort = @sortName

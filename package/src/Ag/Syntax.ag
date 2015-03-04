@@ -1,0 +1,181 @@
+
+module
+  {Ag.Syntax}
+  { module InBound.Syntax.Core
+  , module Ag.Syntax
+  }
+  {}
+
+imports
+{
+import InBound.Syntax.Core
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map
+import qualified Data.Set
+}
+
+data Type
+  | TString
+  | TSet
+      valueType :: Type
+  | TList
+      valueType :: Type
+  | TMap
+      keyType   :: Type
+      valueType :: Type
+  | TTerminal
+      typeName  :: String
+  | TSort
+      sortName  :: SortName
+deriving Type : Eq, Show
+
+type Synonyms = [Synonym]
+data Synonym
+  | Synonym
+      synonym :: String
+      ty      :: Type
+deriving Synonym : Eq, Show
+
+data Specification
+  | Specification
+      specModuleName :: String
+      specSynonyms   :: Synonyms
+      specSortDecls  :: SortDecls
+deriving Specification : Eq, Show
+
+type NamespaceDecls = [NamespaceDecl]
+type MbSortName = maybe SortName
+data NamespaceDecl
+  | NamespaceDecl
+      namespaceName   :: NamespaceName
+      namespaceTarget :: MbSortName
+deriving NamespaceDecl : Eq, Show
+
+type SortDecls = [SortDecl]
+data SortDecl
+  | SortDecl
+      sortName       :: SortName
+      sortAttributes :: AttrDecls
+      sortCtors      :: CtorDecls
+      sortSemFuns    :: SemFuns
+deriving SortDecl : Eq, Show
+
+type AttrDecls = [AttrDecl]
+data AttrDecl
+  | SynDecl
+      attrName        :: AttrName
+      attrType        :: Type
+  | InhDecl
+      attrName        :: AttrName
+      attrType        :: Type
+deriving AttrDecl : Eq, Show
+
+type CtorDecls = [CtorDecl]
+data CtorDecl
+  | CtorDecl
+      ctorName        :: CtorName
+      ctorFields      :: CtorFieldDecls
+      ctorLocAttrDecl :: LocAttrDecls
+      ctorAttrDefs    :: AttrDefs
+deriving CtorDecl : Eq, Show
+
+type LocAttrDecls = [LocAttrDecl]
+data LocAttrDecl
+  | LocAttrDecl
+      attrName        :: AttrName
+      attrType        :: Type
+deriving LocAttrDecl : Eq, Show
+
+type CtorFieldDecls = [CtorFieldDecl]
+data CtorFieldDecl
+  | CFSubtree
+      ctorFieldName :: FieldName
+      ctorFieldType :: SortName
+  | CFTerminal
+      ctorFieldName :: FieldName
+      ctorFieldType :: String
+deriving CtorFieldDecl : Eq, Show
+
+data NodeLabel
+  | Lhs
+  | Loc
+  | Sub
+      nodeFieldLabel :: FieldName
+deriving NodeLabel : Eq, Ord, Show
+
+data AttrRef
+  | AttrRef
+      nodeLabel :: NodeLabel
+      attrLabel :: AttrName
+deriving AttrRef : Eq, Ord, Show
+
+type AttrDefs = [AttrDef]
+data AttrDef
+  | AttrDef
+      attrDefRef    :: AttrRef
+      attrDefExpr   :: Expr
+deriving AttrDef : Eq, Show
+
+type Exprs = [Expr]
+data Expr
+  | ExprAttrRef
+      attrRefName   :: AttrRef
+  | ExprField
+      fn            :: FieldName
+  -- Support for fresh variables
+  | ExprFresh
+      ctx           :: Expr
+  -- Support for lists
+  | ExprNil
+  | ExprCons
+      tail          :: Expr
+      head          :: Expr
+  -- Support for sets
+  | ExprSetEmpty
+  | ExprSetSingleton
+      elem            :: Expr
+  | ExprSetInsert
+      elem            :: Expr
+      elems           :: Expr
+  | ExprSetUnion
+      left            :: Expr
+      right           :: Expr
+  | ExprSetUnions
+      elems           :: Exprs
+  | ExprSetDifference
+      left            :: Expr
+      right           :: Expr
+  -- Support for map
+  | ExprMapEmpty
+  | ExprMapSingleton
+      key             :: Expr
+      value           :: Expr
+  | ExprMapInsert
+      key             :: Expr
+      value           :: Expr
+      mapping         :: Expr
+  | ExprMapLookup
+      def             :: Expr
+      key             :: Expr
+      mapping         :: Expr
+  -- Support for term construction
+  | ExprCtor
+      ctorName        :: CtorName
+      fields          :: Exprs
+deriving Expr : Eq, Show
+
+-- Support for extracting semantic functions
+type AttrNameType = (AttrName,Type)
+type AttrNameTypes = [AttrNameType]
+type SemFuns = [SemFun]
+data SemFun
+  | SemFun
+      semName :: String
+      semInh  :: AttrNameTypes
+      semSyn  :: AttrNameTypes
+deriving SemFun : Eq, Show
+
+-- Environment definitions
+type LocEnvAttrType = map {AttrName} Type
+type EnvAttrType = map {(SortName,AttrName)} Type

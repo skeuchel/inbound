@@ -1,0 +1,63 @@
+module {InBound.WellFormed} {} {}
+
+imports
+{
+import Data.Maybe
+
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as Map
+import qualified Data.Set as Set
+
+import InBound.Syntax
+}
+
+-- Type checking expressions
+
+attr Expr
+  syn typeCheck :: {Type -> Bool}
+
+sem Expr
+  | SynRef
+      loc.mbFieldSort = Map.lookup @synRefField @lhs.envField
+      loc.mbType = do
+                     sort <- @loc.mbFieldSort
+                     Map.lookup (sort,@synRefName) @lhs.envAttrSyn
+  | InhRef
+      loc.mbType = Map.lookup (@lhs.envSort,@inhRefName) @lhs.envAttrInh
+  | Cons
+      loc.mbType = fmap Context $ Map.lookup @head @lhs.envAtom
+
+sem Expr
+ -- TODO: Check for atomlist type in Nil/Cons case
+  | SynRef InhRef Cons
+      lhs.typeCheck   = \t -> case @loc.mbType of
+                                Just t' -> t == t'
+                                Nothing -> False
+  | Nil
+      lhs.typeCheck   = \t -> True
+
+attr Expr
+  syn wellFormednessErrors use {++} {[]} :: {[String]}
+
+sem Expr
+  | SynRef
+      lhs.wellFormednessErrors =
+        case () of
+         _| isNothing @loc.mbFieldSort -> ["Unknown field " ++ @synRefField]
+          | isNothing @loc.mbType      -> ["Unknown synthesized attribute " ++ @synRefName]
+          | otherwise                  -> []
+  | InhRef
+      lhs.wellFormednessErrors =
+        if isNothing @loc.mbType
+          then ["Unknown inherited attribute " ++ @inhRefName]
+          else []
+  | Cons
+      lhs.wellFormednessErrors =
+        case () of
+         _| isNothing @loc.mbType -> ["Unkown atom " ++ @head]
+
+-- Main file:
+--  - parse file
+--  - check
+--  - output

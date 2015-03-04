@@ -1,0 +1,118 @@
+module {InBound.Elaboration.FreeVar} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+attrNameToFreeVarName :: AttrName -> AttrName
+attrNameToFreeVarName (AN an) = AN $ an ++ "_fv"
+
+attrRefToFreeVarRef :: AttrRef -> Ag.AttrRef
+attrRefToFreeVarRef (AttrRef nl an) =
+  Ag.AttrRef (elabNodeLabel nl) (attrNameToFreeVarName an)
+}
+
+sem AttrDecl
+  | SynDecl
+      loc.freeVarType =
+        case @attrType.self of
+          Context ns -> Ag.TSet (Ag.TTerminal (fromNN ns))
+      loc.freeVarAName = attrNameToFreeVarName @attrName
+      +elaboration =
+        [ Ag.InhDecl
+          @loc.freeVarAName
+          @loc.freeVarType
+        ] ++
+  | InhDecl
+      loc.freeVarType =
+        case @attrType.self of
+          Context ns -> Ag.TSet (Ag.TTerminal (fromNN ns))
+      loc.freeVarAName = attrNameToFreeVarName @attrName
+      +elaboration =
+        [ Ag.SynDecl
+          @loc.freeVarAName
+          @loc.freeVarType
+        ] ++
+
+
+attr Expr AttrDef
+  syn elabFreeVar :: {Map AttrRef [Ag.Expr]}
+attr AttrDefs
+  syn elabFreeVar use {M.unionWith (++)} {M.empty}
+    :: {Map AttrRef [Ag.Expr]}
+
+sem Expr
+  | ExprAttrRef ExprNil
+      lhs.elabFreeVar = M.empty
+  | ExprCons
+      +elabFreeVar =
+        M.insertWith (++)
+          @tail.attrName
+          [ Ag.ExprSetDifference
+            (Ag.ExprAttrRef $
+             attrRefToFreeVarRef @loc.attrName)
+            (Ag.ExprSetSingleton $
+             Ag.ExprField @head)
+          ]
+
+sem AttrDef
+  | AttrDef
+      lhs.elabFreeVar =
+        M.insertWith (++)
+          @attrDefExpr.attrName
+          [ (Ag.ExprAttrRef $
+               attrRefToFreeVarRef @attrDefRef.self)
+          ] @attrDefExpr.elabFreeVar
+
+attr CtorFieldDecl CtorFieldDecls
+  syn elabFreeVar use {M.unionWith (++)} {M.empty}
+    :: {Map AttrRef [Ag.Expr]}
+
+sem CtorFieldDecl
+  | CFRef
+      lhs.elabFreeVar =
+        M.singleton
+          (AttrRef Lhs @ctorFieldType)
+          [Ag.ExprSetSingleton $
+             Ag.ExprField @ctorFieldName]
+
+sem CtorDecl
+  | CtorDecl
+      loc.attrDefsElabFree =
+         [ Ag.AttrDef
+             (attrRefToFreeVarRef k)
+             (Ag.ExprSetUnions v)
+         | (k,v) <- M.toList (M.unionsWith (++)
+                                [ M.map (const []) @loc.envSetAttrUse
+                                , @ctorFields.elabFreeVar
+                                , @ctorAttrDefs.elabFreeVar
+                                ])
+         ]
+
+-- Collect attribute names for semantic funcions
+attr AttrDecls AttrDecl
+  syn freeVarFunInh use {++} {[]} :: {Ag.AttrNameTypes}
+  syn freeVarFunSyn use {++} {[]} :: {Ag.AttrNameTypes}
+
+sem AttrDecl
+  | SynDecl
+      +freeVarFunInh = (@loc.freeVarAName,@loc.freeVarType) :
+  | InhDecl
+      +freeVarFunSyn = (@loc.freeVarAName,@loc.freeVarType) :
+
+sem SortDecl
+  | SortDecl
+      loc.freeVarFun =
+        Ag.SemFun
+          ("fvs_" ++ fromSN @sortName)
+          @sortAttributes.freeVarFunInh
+          @sortAttributes.freeVarFunSyn

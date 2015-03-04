@@ -1,0 +1,112 @@
+
+module
+  {InBound.Syntax}
+  { module InBound.Syntax.Core
+  , module InBound.Syntax
+  }
+  {}
+
+imports
+{
+import InBound.Syntax.Core
+}
+
+data Type
+  | Context
+      namespace    :: NamespaceName
+deriving Type : Eq, Show
+
+data Specification
+  | Specification
+      specModuleName     :: String
+      specNamespaceDecls :: NamespaceDecls
+      specSortDecls      :: SortDecls
+deriving Specification : Eq, Show
+
+type NamespaceNames = [NamespaceName]
+type NamespaceDecls = [NamespaceDecl]
+type MbSortName = maybe SortName
+data NamespaceDecl
+  | NamespaceDecl
+      namespaceName   :: NamespaceName
+      namespaceTarget :: MbSortName
+deriving NamespaceDecl : Eq, Show
+
+type SortDecls = [SortDecl]
+data SortDecl
+  | SortDecl
+      sortName       :: SortName
+      sortAttributes :: AttrDecls
+      sortCtors      :: CtorDecls
+deriving SortDecl : Eq, Show
+
+type AttrDecls = [AttrDecl]
+data AttrDecl
+  | SynDecl
+      attrName        :: AttrName
+      attrType        :: Type
+  | InhDecl
+      attrName        :: AttrName
+      attrType        :: Type
+deriving AttrDecl : Eq, Show
+
+type CtorDecls = [CtorDecl]
+data CtorDecl
+  | CtorDecl
+      ctorName        :: CtorName
+      ctorFields      :: CtorFieldDecls
+      ctorLocAttrDecl :: LocAttrDecls
+      ctorAttrDefs    :: AttrDefs
+deriving CtorDecl : Eq, Show
+
+type LocAttrDecls = [LocAttrDecl]
+data LocAttrDecl
+  | LocAttrDecl
+      attrName        :: AttrName
+      attrType        :: Type
+deriving LocAttrDecl : Eq, Show
+
+type CtorFieldDecls = [CtorFieldDecl]
+data CtorFieldDecl
+  | CFRef
+      ctorFieldName :: FieldName
+      ctorFieldType :: AttrName
+  | CFAtom
+      ctorFieldName :: FieldName
+      ctorFieldType :: NamespaceName
+  | CFSubtree
+      ctorFieldName :: FieldName
+      ctorFieldType :: SortName
+  | CFTerminal
+      ctorFieldName :: FieldName
+      ctorFieldType :: String
+deriving CtorFieldDecl : Eq, Show
+
+data NodeLabel
+  | Lhs
+  | Loc
+  | Sub
+      nodeFieldLabel :: FieldName
+deriving NodeLabel : Eq, Ord, Show
+
+data AttrRef
+  | AttrRef
+      nodeLabel :: NodeLabel
+      attrLabel :: AttrName
+deriving AttrRef : Eq, Ord, Show
+
+type AttrDefs = [AttrDef]
+data AttrDef
+  | AttrDef
+      attrDefRef    :: AttrRef
+      attrDefExpr   :: Expr
+deriving AttrDef : Eq, Show
+
+data Expr
+  | ExprAttrRef
+      attrRefName   :: AttrRef
+  | ExprNil
+  | ExprCons
+      tail          :: Expr
+      head          :: FieldName
+deriving Expr : Eq, Show

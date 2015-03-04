@@ -1,0 +1,75 @@
+module {InBound.Elaboration.SubstMap} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+attrNameToSubstMapName :: AttrName -> AttrName
+attrNameToSubstMapName (AN an) = AN $ an ++ "_sub"
+
+attrRefToSubstMapRef :: AttrRef -> Ag.AttrRef
+attrRefToSubstMapRef (AttrRef nl an) =
+  Ag.AttrRef (elabNodeLabel nl) (attrNameToSubstMapName an)
+}
+
+-- Elaborate attribute declarations
+sem AttrDecl
+  | SynDecl
+      loc.agdecl = Ag.SynDecl
+  | InhDecl
+      loc.agdecl = Ag.InhDecl
+  | InhDecl SynDecl
+      loc.namespace = case @attrType.self of
+                        Context ns -> ns
+      loc.mbsort = join $ M.lookup @loc.namespace @lhs.namespaces
+      loc.substitutable = isJust @loc.mbsort
+      loc.sort = fromJust @loc.mbsort
+      loc.substMapType = Ag.TMap
+                           (Ag.TTerminal $ fromNN @loc.namespace)
+                           (Ag.TSort @loc.sort)
+      +elaboration = if @loc.substitutable
+                     then ([ @loc.agdecl
+                               (attrNameToSubstMapName @attrName)
+                               @loc.substMapType
+                           ] ++)
+                     else id
+
+-- Elaborate attribute definitions
+sem AttrDef
+  | AttrDef
+      +elaboration =
+        if @loc.lhssubstitutable
+        then ((Ag.AttrDef
+                 (attrRefToSubstMapRef @attrDefRef.self)
+                 (Ag.ExprAttrRef $
+                    attrRefToSubstMapRef @attrDefExpr.attrName) :
+                 @attrDefExpr.elabSubstMap) ++)
+        else id
+
+attr Expr
+  syn elabSubstMap use {++} {[]} :: {[Ag.AttrDef]}
+sem Expr
+  | ExprAttrRef
+      lhs.elabSubstMap = []
+  | ExprNil
+      lhs.elabSubstMap =
+        [ Ag.AttrDef
+            (attrRefToSubstMapRef @loc.attrName)
+            Ag.ExprSetEmpty
+        ]
+  | ExprCons
+      lhs.elabSubstMap =
+        [ Ag.AttrDef
+            (attrRefToSubstMapRef @loc.attrName)
+            (Ag.ExprAttrRef $
+               attrRefToSubstMapRef @tail.attrName)
+        ] ++ @tail.elabSubstMap

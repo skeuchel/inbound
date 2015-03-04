@@ -1,0 +1,227 @@
+module {InBound.Environment} {} {}
+
+imports
+{
+import Control.Monad
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+}
+
+-- Namespace information
+attr NamespaceDecl NamespaceDecls
+  syn namespaces use {M.union} {M.empty} :: {Map NamespaceName MbSortName}
+
+sem NamespaceDecl
+  | NamespaceDecl
+    lhs.namespaces = M.singleton @namespaceName @namespaceTarget.self
+
+attr SortDecl SortDecls AttrDecl AttrDecls CtorDecl CtorDecls
+  LocAttrDecl LocAttrDecls CtorFieldDecl CtorFieldDecls AttrDefs AttrDef
+  -- This is the set of all the namespaces declared in the specification.
+  inh namespaces :: {Map NamespaceName MbSortName}
+  -- A list of sorts with variables
+  inh varsorts   :: {Map SortName [NamespaceName]}
+
+sem Specification
+  | Specification
+      loc.namespaces = @specNamespaceDecls.namespaces
+      loc.varsorts = M.fromListWith (++)
+                       [ (v,[k])
+                       | (k,Just v) <- M.toList @loc.namespaces
+                       ]
+-- Sort information
+attr AttrDecl AttrDecls CtorDecls CtorDecl
+     CtorFieldDecls CtorFieldDecl AttrDef AttrDefs Expr
+  -- This inherited attribute passes down the name of the sort for the
+  -- constructors and attribute declarations / definitions.
+  inh envSort  :: SortName
+  -- Variable namespaces for this sort
+  inh envVars  :: NamespaceNames
+
+sem SortDecl
+  | SortDecl
+      loc.envSort = @sortName
+      loc.envVars = M.findWithDefault [] @sortName @lhs.varsorts
+
+-- Field names
+attr CtorFieldDecls CtorFieldDecl
+  syn sFieldEnv use {M.union} {M.empty} :: {Map FieldName SortName}
+  syn sAtomEnv  use {M.union} {M.empty} :: {Map FieldName NamespaceName}
+
+sem CtorFieldDecl
+  | CFSubtree lhs.sFieldEnv = M.singleton @ctorFieldName @ctorFieldType
+  | CFAtom    lhs.sAtomEnv  = M.singleton @ctorFieldName @ctorFieldType
+
+attr AttrDef AttrDefs Expr
+  inh envField  :: {Map FieldName SortName}
+  inh envAtom   :: {Map FieldName NamespaceName}
+
+sem CtorDecl
+  | CtorDecl
+      loc.envField = @ctorFields.sFieldEnv
+      loc.envAtom  = @ctorFields.sAtomEnv
+
+
+
+-- Attribute environments
+attr AttrDecl AttrDecls
+  -- The attributes sAttrSyn resp. sAttrInh accumulate a mapping from
+  -- synthesized resp. inherited attribute names to the type of the
+  -- attribute. sAttrSyn and sAttrInh carry incomplete information.
+  syn sAttrSyn use {M.union} {M.empty} :: {Map AttrName Type}
+  syn sAttrInh use {M.union} {M.empty} :: {Map AttrName Type}
+
+attr Specification SortDecl SortDecls CtorDecl CtorDecls
+  -- At the level of sorts we add the sort name (fst) as a key next to the
+  -- attribute name (snd). sAttrSyn and sAttrInh are potentially incomplete.
+  syn sAttrSyn use {M.union} {M.empty} :: {Map (SortName,AttrName) Type}
+  syn sAttrInh use {M.union} {M.empty} :: {Map (SortName,AttrName) Type}
+
+-- Maps attribute names to types.
+attr CtorDecl CtorDecls CtorFieldDecl CtorFieldDecls AttrDef AttrDefs
+  -- Environments about the attributes specific to a single SortDecl.
+  inh locEnvAttrSyn :: {Map AttrName Type}
+  inh locEnvAttrInh :: {Map AttrName Type}
+
+attr
+  SortDecl SortDecls CtorDecls CtorDecl CtorFieldDecls CtorFieldDecl
+  AttrDef AttrDefs Expr
+  -- Environments about all attributes of all sorts.
+  inh envAttrSyn :: {Map (SortName,AttrName) Type}
+  inh envAttrInh :: {Map (SortName,AttrName) Type}
+
+sem AttrDecl
+  | SynDecl lhs.sAttrSyn = M.singleton @attrName @attrType.self
+  | InhDecl lhs.sAttrInh = M.singleton @attrName @attrType.self
+
+sem SortDecl
+  | SortDecl
+      lhs.sAttrSyn = M.mapKeysMonotonic
+                       (\an -> (@sortName,an))
+                       @sortAttributes.sAttrSyn
+      lhs.sAttrInh = M.mapKeysMonotonic
+                       (\an -> (@sortName,an))
+                       @sortAttributes.sAttrInh
+
+sem SortDecl
+  | SortDecl
+      loc.locEnvAttrSyn = @sortAttributes.sAttrSyn
+      loc.locEnvAttrInh = @sortAttributes.sAttrInh
+
+sem Specification
+  | Specification
+      loc.envAttrSyn = @specSortDecls.sAttrSyn
+      loc.envAttrInh = @specSortDecls.sAttrInh
+
+sem CtorFieldDecl
+  | CFRef
+      loc.namespace = case M.findWithDefault
+                              (error "unknown context attribute")
+                              @ctorFieldType
+                              @lhs.locEnvAttrInh of
+                        Context ns -> ns
+      loc.mbsort = join $ M.lookup @loc.namespace @lhs.namespaces
+  | CFSubtree
+      -- The synthesized attributes of this field.
+      loc.subtreeSynAttrs =
+        [ (an,ty)
+        | ((sn,an),ty) <- M.toList @lhs.envAttrSyn
+        , sn == @ctorFieldType
+        ]
+
+attr CtorDecls CtorDecl AttrDefs AttrDef
+  -- Set of attributes that need to be defined
+  inh envSetAttrDef :: {Map AttrRef Type}
+  -- Set of attributes that can be used in the definition
+  inh envSetAttrUse :: {Map AttrRef Type}
+
+  -- Set of attributes that are defined
+  syn sSetAttrDef use {M.union} {M.empty} :: {Map AttrRef Expr}
+
+sem AttrDef
+  | AttrDef
+      lhs.sSetAttrDef =
+        M.singleton
+          @attrDefRef.self
+          @attrDefExpr.self
+
+
+sem SortDecl
+  | SortDecl
+      -- For each sort we need to define all synthesized attributes.
+      sortCtors.envSetAttrDef =
+        M.mapKeysMonotonic (\an -> AttrRef Lhs an) @loc.locEnvAttrSyn
+      -- For each sort we can use all inherited attributes.
+      sortCtors.envSetAttrUse =
+        M.mapKeysMonotonic (\an -> AttrRef Lhs an) @loc.locEnvAttrInh
+
+sem CtorDecl
+  | CtorDecl
+      loc.envSetAttrDef =
+        @lhs.envSetAttrDef `M.union`
+        M.fromList
+          [ (AttrRef (Sub f) a, t)
+          | (f,s1)     <- M.toList @loc.envField
+          , ((s2,a),t) <- M.toList @lhs.envAttrInh
+          , s1 == s2
+          ]
+      loc.envSetAttrUse =
+        @lhs.envSetAttrUse `M.union`
+        M.fromList
+          [ (AttrRef (Sub f) a, t)
+          | (f,s1)     <- M.toList @loc.envField
+          , ((s2,a),t) <- M.toList @lhs.envAttrSyn
+          , s1 == s2
+          ]
+
+
+attr Expr
+  -- The attribute that is being defined by this expression
+  inh attrDefRef  :: AttrRef
+  inh depth        :: Int
+  -- The local attribute name of this node
+  syn attrName     :: AttrRef
+  -- -- Parent node attribute name
+  -- inh attrNameLhs  :: AttrRef
+
+{
+localNodeLabel :: NodeLabel -> String
+localNodeLabel Lhs      = "lhs_"
+localNodeLabel Loc      = "loc_"
+localNodeLabel (Sub fn) = fromFN fn ++ "_"
+
+localAttrRef :: AttrRef -> Int -> AttrRef
+localAttrRef (AttrRef nl (AN an)) depth =
+  AttrRef Loc
+    (AN $ localNodeLabel nl ++ an ++ "_" ++ show depth)
+}
+
+sem AttrDef
+  | AttrDef
+      attrDefExpr.attrDefRef = @attrDefRef.self
+      attrDefExpr.depth      = 0
+      loc.lhsnamespace       =
+        case M.lookup @attrDefRef.self @lhs.envSetAttrDef of
+          Just (Context ns) -> ns
+          Nothing           -> error "AttrDef namespace"
+      loc.lhsmbsort = join $ M.lookup @loc.lhsnamespace @lhs.namespaces
+      loc.lhssubstitutable = isJust @loc.lhsmbsort
+      loc.lhssort = case @loc.lhsmbsort of
+                      Just s  -> s
+                      Nothing -> error "AttrDef lhssort"
+      -- attrDefExpr.attrNameLhs = @attrDefRef.self
+
+sem Expr
+  | ExprAttrRef
+      loc.attrName = @attrRefName.self
+  | ExprNil
+      loc.attrName = localAttrRef @lhs.attrDefRef @lhs.depth
+  | ExprCons
+      loc.attrName = localAttrRef @lhs.attrDefRef @lhs.depth
+      tail.depth = 1 + @lhs.depth
+      -- tail.attrNameLhs = @loc.attrName

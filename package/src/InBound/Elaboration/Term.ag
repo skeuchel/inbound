@@ -1,0 +1,122 @@
+module {InBound.Elaboration.Term} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+defaultValues :: Inh_Specification
+defaultValues = (Inh_Specification {})
+
+elaborateSpec :: Specification -> Ag.Specification
+elaborateSpec spec =
+  let sem = wrap_Specification (sem_Specification spec) defaultValues
+  in elaboration_Syn_Specification sem
+}
+
+-- Specification
+attr Specification
+  syn elaboration :: {Ag.Specification}
+
+sem Specification
+  | Specification
+      lhs.elaboration =
+        Ag.Specification
+          @specModuleName
+          @specNamespaceDecls.elaboration
+          @specSortDecls.elaboration
+
+-- Namespaces
+attr NamespaceDecls
+  syn elaboration use {:} {[]} :: {Ag.Synonyms}
+attr NamespaceDecl
+  syn elaboration :: {Ag.Synonym}
+
+sem NamespaceDecl
+  | NamespaceDecl
+      lhs.elaboration =
+        Ag.Synonym (fromNN @namespaceName) Ag.TString
+
+-- Sort declarations
+attr SortDecls
+  syn elaboration use {:} {[]} :: {Ag.SortDecls}
+attr SortDecl
+  syn elaboration :: {Ag.SortDecl}
+
+sem SortDecl
+  | SortDecl
+      lhs.elaboration =
+        Ag.SortDecl
+          @sortName
+          (@sortAttributes.elaboration ++
+           -- Renaming
+           @loc.renameAttrDecl ++
+           -- Substitution
+           @loc.substAttrDecl)
+          @sortCtors.elaboration
+          [@loc.freeVarFun, @loc.renameFun, @loc.substFun]
+
+-- Attribute declarations
+attr AttrDecls
+  syn elaboration use {++} {[]} :: {Ag.AttrDecls}
+attr AttrDecl
+  syn elaboration use {++} {[]} :: {Ag.AttrDecls}
+
+-- Constructor declarations
+attr CtorDecls
+  syn elaboration use {:} {[]} :: {Ag.CtorDecls}
+attr CtorDecl
+  syn elaboration :: {Ag.CtorDecl}
+
+sem CtorDecl
+  | CtorDecl
+     loc.attrDefsElab = @ctorAttrDefs.elaboration ++
+                        -- Free variables
+                        @loc.attrDefsElabFree ++
+                        -- Renaming
+                        @loc.renameAttrDef ++
+                        -- Substitution
+                        @loc.substAttrDef
+     lhs.elaboration =
+       Ag.CtorDecl
+         @ctorName
+         @ctorFields.elaboration
+         []
+         @loc.attrDefsElab
+
+-- Field declarations
+attr CtorFieldDecls
+  syn elaboration use {:} {[]} :: {Ag.CtorFieldDecls}
+attr CtorFieldDecl
+  syn elaboration :: {Ag.CtorFieldDecl}
+
+sem CtorFieldDecl
+  | CFRef
+      lhs.elaboration =
+        case M.findWithDefault
+               (error $ "CFRef elab: " ++ show @ctorFieldType)
+               @ctorFieldType
+               @lhs.locEnvAttrInh of
+         Context (NN ns) -> Ag.CFTerminal @ctorFieldName ns
+  | CFAtom
+      lhs.elaboration =
+        case @ctorFieldType of
+          NN ns -> Ag.CFTerminal @ctorFieldName ns
+  | CFSubtree
+      lhs.elaboration = Ag.CFSubtree @ctorFieldName @ctorFieldType
+  | CFTerminal
+      lhs.elaboration = Ag.CFTerminal @ctorFieldName @ctorFieldType
+
+-- Attribute definitions
+attr AttrDefs
+  syn elaboration use {++} {[]} :: {Ag.AttrDefs}
+attr AttrDef
+  syn elaboration use {++} {[]} :: {Ag.AttrDefs}

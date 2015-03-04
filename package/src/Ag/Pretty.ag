@@ -1,0 +1,367 @@
+module
+  {Ag.Pretty}
+  {}
+  {}
+
+imports
+{
+import Control.Monad
+import Data.List (intersperse)
+import Data.Maybe
+
+import Ag.Pretty.Common
+import Ag.Syntax
+}
+
+{
+defaultValues :: Inh_Specification
+defaultValues = (Inh_Specification {})
+
+ppSpecification :: Specification -> Doc
+ppSpecification spec =
+  let sem = wrap_Specification (sem_Specification spec) defaultValues
+  in pretty_Syn_Specification sem
+}
+
+attr Specification
+  syn pretty use {<+>} {empty} :: {Doc}
+
+-- Top-level pretty printing
+sem Specification
+  | Specification
+      loc.pretty =
+        mySep [ text "module"
+              , braces (text @specModuleName)
+              , braces empty
+              , braces empty
+              ]
+        <$> empty
+        <$> text "imports"
+        <$> char '{'
+        <$> myVcat
+            [ text "import Data.Map (Map)"
+            , text "import Data.Set (Set)"
+            , text "import qualified Data.List"
+            , text "import qualified Data.Map"
+            , text "import qualified Data.Set"
+            ]
+        <$> char '}'
+        <$> empty
+        <$> char '{'
+        <$> myVcat
+            [ mySep [ text "type"
+                    , text sn
+                    , text "="
+                    , text "String"
+                    ]
+            | Synonym sn ty <- @specSynonyms.self
+            ]
+        <$> empty
+        <$> text "fresh :: Set String -> String"
+        <$> text "fresh ctx = head [v | v <- vs, not (Data.Set.member v ctx)]"
+        <$> text "  where vs = map (\\n -> 'v' : show n) [0..]"
+        <$> char '}'
+        <$> @specSortDecls.vPretty
+        <$> myVcat @specSortDecls.prettyAttr
+        <$> myVcat @specSortDecls.prettySem
+        <$> empty
+        <$> char '{'
+        <$> myVcat @specSortDecls.prettySemFun
+        <$> char '}'
+
+-- Pretty print sort declarations
+attr SortDecl CtorDecl CtorFieldDecl
+  syn pretty use {<+>} {empty} :: {Doc}
+
+attr SortDecls CtorDecls CtorFieldDecls Exprs SemFuns
+  syn lPretty use {:} {[]} :: {[Doc]}
+  syn vPretty :: {Doc}
+  syn hPretty :: {Doc}
+
+sem SortDecls CtorDecls CtorFieldDecls Exprs SemFuns
+  | Nil
+      loc.lPretty = []
+      loc.vPretty = empty
+      loc.hPretty = empty
+  | Cons
+      loc.lPretty = @hd.pretty : @tl.lPretty
+      loc.vPretty = vsep @lPretty
+      loc.hPretty = hsep @lPretty
+
+sem SortDecl
+  | SortDecl
+      loc.pretty =
+        blankline $
+          mySep [ text "data"
+                , text (fromSN @sortName)
+                ] <$>
+          indent 2 (vcat (map ((char '|')<+>) @sortCtors.lPretty)) <$>
+          mySep [ text "deriving"
+                , text (fromSN @sortName)
+                , colon
+                , text "Show"
+                ]
+
+sem CtorDecl
+  | CtorDecl
+      loc.pretty =
+        text (fromCN @ctorName) <+>
+          indent 4 (myVcat @ctorFields.lPretty)
+
+sem CtorFieldDecl
+  | CFSubtree
+      loc.pretty =
+        mySep [ text (fromFN @ctorFieldName)
+              , text "::"
+              , text (fromSN @ctorFieldType)
+              ]
+  | CFTerminal
+      loc.pretty =
+        mySep [ text (fromFN @ctorFieldName)
+              , text "::"
+              , text @ctorFieldType
+              ]
+
+-- Pretty print attribute declarations
+attr SortDecl  syn prettyAttr              :: {Doc}
+attr SortDecls syn prettyAttr use {:} {[]} :: {[Doc]}
+attr AttrDecl  syn pretty                  :: {Doc}
+attr AttrDecls syn pretty use {:} {[]}     :: {[Doc]}
+
+sem SortDecl
+  | SortDecl
+      loc.hasAttrDecls = not $ null @sortAttributes.self
+      loc.prettyAttr =
+        if @loc.hasAttrDecls
+          then text "attr" <+> text (fromSN @sortName) <$>
+               indent 2 (myVcat @sortAttributes.pretty)
+          else empty
+
+sem AttrDecl
+  | SynDecl
+      loc.pretty =
+        myFsep [ text "syn"
+               , text (fromAN @attrName)
+               , text "::"
+               , braces @attrType.pretty
+               ]
+  | InhDecl
+      loc.pretty =
+        myFsep [ text "inh"
+               , text (fromAN @attrName)
+               , text "::"
+               , braces @attrType.pretty
+               ]
+
+attr Type
+  syn pretty :: {Doc}
+
+sem Type
+  | TString   lhs.pretty = text "String"
+  | TSet      lhs.pretty = text "Set" <+> parens @valueType.pretty
+  | TList     lhs.pretty = brackets @valueType.pretty
+  | TMap      lhs.pretty = text "Map" <+>
+                           parens @keyType.pretty <+>
+                           parens @valueType.pretty
+  | TTerminal lhs.pretty = text @typeName
+  | TSort     lhs.pretty = text (fromSN @sortName)
+
+-- Pretty print attribute definitions
+attr SortDecl  syn prettySem              :: {Doc}
+attr SortDecls syn prettySem use {:} {[]} :: {[Doc]}
+attr CtorDecl  syn prettySem              :: {Doc}
+attr CtorDecls syn prettySem use {:} {[]} :: {[Doc]}
+attr AttrDef   syn pretty                 :: {Doc}
+attr AttrDefs  syn pretty use {:} {[]}    :: {[Doc]}
+attr AttrRef   syn pretty                 :: {Doc}
+attr NodeLabel syn pretty                 :: {Doc}
+attr Expr      syn pretty                 :: {Doc}
+
+sem SortDecl
+  | SortDecl
+      loc.hasAttrDefs = True
+      loc.prettySem =
+        if @loc.hasAttrDefs
+          then text "sem" <+> text (fromSN @sortName) <$>
+               indent 2 (myVcat @sortCtors.prettySem)
+          else empty
+
+sem CtorDecl
+  | CtorDecl
+      loc.hasAttrDefs = True
+      loc.prettySem =
+        if @loc.hasAttrDefs
+          then text "|" <+> text (fromCN @ctorName) <$>
+               indent 4 (myVcat @ctorAttrDefs.pretty)
+          else empty
+
+sem AttrDef
+  | AttrDef
+      lhs.pretty = @attrDefRef.pretty <+>
+                   equals <+>
+                   @attrDefExpr.pretty
+
+sem AttrRef
+  | AttrRef
+      lhs.pretty = @nodeLabel.pretty <> dot <> text (fromAN @attrLabel)
+
+sem NodeLabel
+  | Lhs
+      lhs.pretty = text "lhs"
+  | Loc
+      lhs.pretty = text "loc"
+  | Sub
+      lhs.pretty = text (fromFN @nodeFieldLabel)
+
+sem Expr
+  | ExprAttrRef
+      lhs.pretty = text "@" <> @attrRefName.pretty
+  | ExprField
+      lhs.pretty = text "@" <> text (fromFN @fn)
+  -- Fresh variables
+  | ExprFresh
+      lhs.pretty = text "fresh" <+> parens @ctx.pretty
+  -- Lists
+  | ExprNil
+      lhs.pretty = text "[]"
+  | ExprCons
+      lhs.pretty = parens @head.pretty <+>
+                   colon <+>
+                   parens @tail.pretty
+  -- Sets
+  | ExprSetEmpty
+      lhs.pretty = text "Data.Set.empty"
+  | ExprSetSingleton
+      lhs.pretty = text "Data.Set.singleton" <+>
+                   parens @elem.pretty
+  | ExprSetInsert
+      lhs.pretty = text "Data.Set.insert" <+>
+                   parens @elem.pretty <+>
+                   parens @elems.pretty
+  | ExprSetUnion
+      lhs.pretty = text "Data.Set.union" <+>
+                   parens @left.pretty <+>
+                   parens @right.pretty
+  | ExprSetDifference
+      lhs.pretty = text "Data.Set.difference" <+>
+                   parens @left.pretty <+>
+                   parens @right.pretty
+  | ExprSetUnions
+      lhs.pretty = text "Data.Set.unions" <+>
+                   list @elems.lPretty
+  -- Maps
+  | ExprMapEmpty
+      lhs.pretty = text "Data.Map.empty"
+  | ExprMapSingleton
+      lhs.pretty = text "Data.Map.singleton" <+>
+                   parens @key.pretty <+>
+                   parens @value.pretty
+  | ExprMapInsert
+      lhs.pretty = text "Data.Map.insert" <+>
+                   parens @key.pretty <+>
+                   parens @value.pretty <+>
+                   parens @mapping.pretty
+  | ExprMapLookup
+      lhs.pretty = text "Data.Map.findWithDefault" <+>
+                   parens @def.pretty <+>
+                   parens @key.pretty <+>
+                   parens @mapping.pretty
+  -- Terms
+  | ExprCtor
+      lhs.pretty = text (fromCN @ctorName) <+>
+                   hsep (map parens @fields.lPretty)
+
+-- Pretty semantic function definitions
+attr SortDecl  syn prettySemFun              :: {Doc}
+attr SortDecls syn prettySemFun use {:} {[]} :: {[Doc]}
+
+sem SortDecl
+  | SortDecl
+      loc.prettySemFun =
+        vcat (@sortSemFuns.lPretty)
+
+attr SemFun
+  syn pretty :: {Doc}
+
+-- Fresh variable names
+attr AttrNameTypes
+  inh fresh :: {Int}
+attr AttrNameType
+  inh fresh :: {Int}
+  syn fresh :: {Int}
+
+sem SemFun
+  | SemFun
+      semInh.fresh = 1
+      semSyn.fresh = 1
+
+{
+nextUnique :: Int -> (Int,Int)
+nextUnique u = (u+1,u)
+}
+
+sem SemFun
+  | SemFun
+      loc.signature   =
+        hsep [ text @semName
+             , text "::"
+             , hsep (punctuate' (text "->") $
+                       [text $ fromSN @lhs.envSort] ++
+                       @semInh.prettyType ++
+                       [parenList @semSyn.prettyType])
+             ]
+      loc.definition =
+        vcat
+        [ hsep
+          [ text @semName
+          , hsep (text "x0" : @semInh.prettyInhParam)
+          , text "="
+          , text "res"
+          ]
+        , indent 2 $ text "where"
+        , indent 4 . hsep $
+          [ text "inh"
+          , text "="
+          , text ("Inh_" ++ fromSN @lhs.envSort)
+          , braceList @semInh.prettyInhInit
+          ]
+        , indent 4 . hsep $
+          [ text "syn"
+          , text "="
+          , text ("wrap_" ++ fromSN @lhs.envSort)
+          , parens (text ("sem_" ++ fromSN @lhs.envSort) <+>
+                    text "x0")
+          , text "inh"
+          ]
+        , indent 4 . hsep $
+          [ text "res"
+          , text "="
+          , parenList @semSyn.prettySynAccess
+          ]
+        ]
+      lhs.pretty = @loc.signature <$>
+                   @loc.definition
+
+
+attr AttrNameType  syn prettyType              :: {Doc}
+attr AttrNameTypes syn prettyType use {:} {[]} :: {[Doc]}
+
+attr AttrNameType  syn prettyInhParam              :: {Doc}
+attr AttrNameTypes syn prettyInhParam use {:} {[]} :: {[Doc]}
+attr AttrNameType  syn prettyInhInit              :: {Doc}
+attr AttrNameTypes syn prettyInhInit use {:} {[]} :: {[Doc]}
+
+attr AttrNameType  syn prettySynAccess              :: {Doc}
+attr AttrNameTypes syn prettySynAccess use {:} {[]} :: {[Doc]}
+
+sem AttrNameType
+  | Tuple
+      lhs.prettyType = @x2.pretty
+      loc.inhVar' :: uniqueref fresh
+      loc.inhVar = 'x':show @loc.inhVar'
+      lhs.prettyInhParam  = text @loc.inhVar
+      lhs.prettyInhInit   = text (fromAN @x1 ++ "_Inh_" ++ fromSN @lhs.envSort) <+>
+                            text "=" <+>
+                            text @loc.inhVar
+      lhs.prettySynAccess = text (fromAN @x1 ++ "_Syn_" ++ fromSN @lhs.envSort) <+>
+                            text "syn"

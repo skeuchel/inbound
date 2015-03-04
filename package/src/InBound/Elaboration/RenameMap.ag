@@ -1,0 +1,75 @@
+module {InBound.Elaboration.RenameMap} {} {}
+
+imports
+{
+import Data.Maybe
+import Data.Map (Map)
+import Data.Set (Set)
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import InBound.Syntax
+import qualified Ag.Syntax as Ag
+}
+
+{
+attrNameToRenameMapName :: AttrName -> AttrName
+attrNameToRenameMapName (AN an) = AN $ an ++ "_ren"
+
+attrRefToRenameMapRef :: AttrRef -> Ag.AttrRef
+attrRefToRenameMapRef (AttrRef nl an) =
+  Ag.AttrRef (elabNodeLabel nl) (attrNameToRenameMapName an)
+}
+
+-- Elaborate attribute declarations
+sem AttrDecl
+  | InhDecl SynDecl
+      loc.renameMapType =
+        case @attrType.self of
+          Context ns -> Ag.TMap
+                          (Ag.TTerminal (fromNN ns))
+                          (Ag.TTerminal (fromNN ns))
+  | SynDecl
+      +elaboration =
+        [ Ag.SynDecl
+            (attrNameToRenameMapName @attrName)
+            @loc.renameMapType
+        ] ++
+  | InhDecl
+      +elaboration =
+        [ Ag.InhDecl
+            (attrNameToRenameMapName @attrName)
+            @loc.renameMapType
+        ] ++
+
+-- Elaborate attribute definitions
+sem AttrDef
+  | AttrDef
+      +elaboration =
+        (Ag.AttrDef
+         (attrRefToRenameMapRef @attrDefRef.self)
+         (Ag.ExprAttrRef $
+            attrRefToRenameMapRef @attrDefExpr.attrName) :
+         @attrDefExpr.elabRenameMap) ++
+
+attr Expr
+  syn elabRenameMap use {++} {[]} :: {[Ag.AttrDef]}
+sem Expr
+  | ExprAttrRef
+      lhs.elabRenameMap = []
+  | ExprNil
+      lhs.elabRenameMap =
+        [ Ag.AttrDef
+            (attrRefToRenameMapRef @loc.attrName)
+            Ag.ExprSetEmpty
+        ]
+  | ExprCons
+      lhs.elabRenameMap =
+        [ Ag.AttrDef
+            (attrRefToRenameMapRef @loc.attrName)
+            (Ag.ExprMapInsert
+               (Ag.ExprField @head)
+               (Ag.ExprAttrRef $ renamedFieldRef @head)
+               (Ag.ExprAttrRef $
+                  attrRefToRenameMapRef @tail.attrName))
+        ] ++ @tail.elabRenameMap

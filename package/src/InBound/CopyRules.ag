@@ -1,0 +1,93 @@
+module {InBound.CopyRules} {} {import InBound.Syntax}
+
+include "src/InBound/Syntax.ag"
+include "src/InBound/Environment.ag"
+
+{
+defaultValues :: Inh_Specification
+defaultValues = (Inh_Specification {})
+
+completion :: Specification -> Specification
+completion spec =
+  let sem = wrap_Specification (sem_Specification spec) defaultValues
+  in completion_Syn_Specification sem
+}
+
+attr Specification NamespaceDecls NamespaceDecl MbSortName
+  SortDecls SortDecl AttrDecls AttrDecl CtorDecls CtorDecl
+  CtorFieldDecls CtorFieldDecl LocAttrDecls LocAttrDecl
+  AttrRef Expr Type NodeLabel
+  AttrDefs AttrDef
+  syn completion :: self
+
+
+attr CtorFieldDecl CtorFieldDecls
+  -- A chained environment mapping attribute names to the attribute
+  -- reference with the highest priority. Initially, these are the
+  -- inherited attributes of the parent node which have the lowest
+  -- priority. Subsequently, all field declarations are visited and
+  -- their synthesized attributes override the previous values.
+  chn envCopyRule :: {Map AttrName AttrRef}
+  -- Missing definitions of inherited attributes of subtrees.  This
+  -- maps field names to the list of inherited attributes that were
+  -- not defined for that field.
+  inh missingInhDef :: {Map FieldName [AttrName]}
+  -- The generated copy rules for inherited attributes.
+  syn copyRuleDefs use {++} {[]} :: AttrDefs
+
+sem CtorDecl
+  | CtorDecl
+      ctorFields.envCopyRule =
+        M.mapWithKey
+          (\an ty -> AttrRef Lhs an)
+          @lhs.locEnvAttrInh
+      -- All attribute definitions that are missing
+      loc.missingDefSet =
+        S.difference
+          (M.keysSet @loc.envSetAttrDef)
+          (M.keysSet @ctorAttrDefs.sSetAttrDef)
+      loc.missingInhDef =
+        M.fromListWith (++)
+          [ (fn,[an])
+          | AttrRef (Sub fn) an <- S.toList @loc.missingDefSet
+          ]
+      loc.missingSynDef =
+        [ an | AttrRef Lhs an <- S.toList @loc.missingDefSet ]
+      loc.copyRuleDefs =
+        [ AttrDef (AttrRef Lhs an) (ExprAttrRef rhs)
+        | an <- @loc.missingSynDef,
+          let Just rhs = M.lookup an @ctorFields.envCopyRule
+        ]
+      -- Override the completion self rule to insert the newly
+      -- generated attribute definitions.
+      lhs.completion =
+        CtorDecl
+          @ctorName
+          @ctorFields.self
+          @ctorLocAttrDecl.self
+          (@loc.copyRuleDefs ++ @ctorFields.copyRuleDefs ++ @ctorAttrDefs.self)
+
+sem CtorFieldDecl
+  | CFSubtree
+      -- The list of missing inherited attribute definitions
+      -- for this subtree.
+      loc.missingInhDef =
+        M.findWithDefault []
+          @ctorFieldName
+          @lhs.missingInhDef
+      -- For each missing definition we generate one using the (old)
+      -- copy rule environment passed down to us.
+      lhs.copyRuleDefs =
+        [ AttrDef (AttrRef (Sub @ctorFieldName) an) (ExprAttrRef rhs)
+        | an <- @loc.missingInhDef
+        , let Just rhs = M.lookup an @lhs.envCopyRule
+        ]
+      -- We generate an updated copy rule environment for the
+      -- subsequent fields and the synthesized attributes of the
+      -- parent.
+      lhs.envCopyRule =
+        M.union
+          (M.fromList [ (an,AttrRef (Sub @ctorFieldName) an)
+                      | (an,_) <- @loc.subtreeSynAttrs
+                      ])
+          @lhs.envCopyRule
